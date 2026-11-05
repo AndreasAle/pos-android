@@ -76,6 +76,9 @@ public class MainActivity extends Activity {
     /** The register's print view: /receipt/{order}/print. */
     private static final Pattern RECEIPT_PRINT = Pattern.compile("/receipt/\\d+/print/?$");
 
+    /** The kitchen ticket: /receipt/{order}/kitchen. */
+    private static final Pattern KITCHEN_PRINT = Pattern.compile("/receipt/\\d+/kitchen/?$");
+
     /** The ESC/POS payload the server embeds for RawBT in that view. */
     private static final Pattern RAWBT_PAYLOAD = Pattern.compile("rawbt:base64,([A-Za-z0-9+/=]+)");
 
@@ -83,6 +86,8 @@ public class MainActivity extends Activity {
     private static final String NATIVE_FLAG = "native_app=1";
 
     private ReceiptPrinter printer;
+    /** Second printer for kitchen tickets: only the order's kitchen items, no prices. */
+    private ReceiptPrinter kitchenPrinter;
     private KioskManager   kiosk;
     private AdminPin       adminPin;
 
@@ -114,7 +119,7 @@ public class MainActivity extends Activity {
         Button changeUrlBtn = findViewById(R.id.changeUrlButton);
 
         printStatus = findViewById(R.id.printStatus);
-        printer = new ReceiptPrinter(this, new ReceiptPrinter.Status() {
+        ReceiptPrinter.Status statusPill = new ReceiptPrinter.Status() {
             @Override
             public void progress(String text) {
                 printStatus.removeCallbacks(hidePrintStatus);
@@ -134,7 +139,9 @@ public class MainActivity extends Activity {
                 printStatus.setVisibility(View.VISIBLE);
                 printStatus.postDelayed(hidePrintStatus, 3500);
             }
-        });
+        };
+        printer        = new ReceiptPrinter(this, statusPill, ReceiptPrinter.Role.RECEIPT);
+        kitchenPrinter = new ReceiptPrinter(this, statusPill, ReceiptPrinter.Role.KITCHEN);
         setupWebView();
 
         kiosk    = new KioskManager(this);
@@ -381,6 +388,16 @@ public class MainActivity extends Activity {
             }
         });
 
+        labels.add(kitchenPrinter.isConfigured()
+            ? "🍳 Pilih printer dapur  (" + kitchenPrinter.name() + ")"
+            : "🍳 Pilih printer dapur");
+        actions.add(() -> kitchenPrinter.choosePrinter(false, null));
+
+        if (kitchenPrinter.isConfigured()) {
+            labels.add("🍳 Tes cetak printer dapur");
+            actions.add(kitchenPrinter::testPrint);
+        }
+
         labels.add("Pengaturan WiFi");
         actions.add(() -> kiosk.openWifi(this));
 
@@ -489,6 +506,12 @@ public class MainActivity extends Activity {
     private WebResourceResponse interceptReceipt(WebResourceRequest request) {
         if (!"GET".equals(request.getMethod())) return null;
 
+        String kitchenUrl = printUrl(request.getUrl(), KITCHEN_PRINT);
+        if (kitchenUrl != null) {
+            handleKitchen(kitchenUrl);
+            return infoPage();
+        }
+
         String receiptUrl = receiptPrintUrl(request.getUrl());
         if (receiptUrl == null) return null;
 
@@ -503,12 +526,50 @@ public class MainActivity extends Activity {
      * Our own fetches carry NATIVE_FLAG and are let through.
      */
     private String receiptPrintUrl(Uri uri) {
+        return printUrl(uri, RECEIPT_PRINT);
+    }
+
+    private String printUrl(Uri uri, Pattern which) {
         String path = uri.getPath();
 
-        if (path == null || !RECEIPT_PRINT.matcher(path).find()) return null;
+        if (path == null || !which.matcher(path).find()) return null;
         if (uri.toString().contains(NATIVE_FLAG)) return null;
 
         return uri.getScheme() + "://" + uri.getAuthority() + path.replaceAll("/+$", "");
+    }
+
+    /**
+     * Print the kitchen ticket on the kitchen printer. The register asks for it
+     * after every sale; an order with no kitchen items comes back without a
+     * payload and nothing is printed. Any thread.
+     */
+    private void handleKitchen(String kitchenUrl) {
+        if (!kitchenPrinter.isConfigured()) {
+            runOnUiThread(() -> {
+                Toast.makeText(this, "Pilih printer dapur dulu.", Toast.LENGTH_LONG).show();
+                // Raw ticket bytes cannot go through Android's print dialog.
+                kitchenPrinter.choosePrinter(false, () -> handleKitchen(kitchenUrl));
+            });
+            return;
+        }
+
+        if (!kitchenPrinter.begin()) return;
+
+        new Thread(() -> {
+            try {
+                long t0 = System.currentTimeMillis();
+                byte[] data = fetchPayload(kitchenUrl + "?" + NATIVE_FLAG, "<title>Dapur");
+                kitchenPrinter.fetched(System.currentTimeMillis() - t0);
+
+                if (data == null) {
+                    kitchenPrinter.skip();
+                } else {
+                    kitchenPrinter.print(data);
+                }
+            } catch (Exception e) {
+                kitchenPrinter.abort("Gagal mengambil tiket dapur: " + e.getMessage());
+            }
+        }, "kitchen-fetch").start();
     }
 
     /** Print a receipt, asking which printer first if none is chosen yet. Any thread. */
@@ -552,6 +613,19 @@ public class MainActivity extends Activity {
     }
 
     private byte[] fetchEscPos(String url) throws Exception {
+        return fetchPayload(url, null);
+    }
+
+    /**
+     * The ESC/POS payload embedded in a print page.
+     *
+     * @param emptyMarker text that proves the page is the right one even with no
+     *                    payload (a kitchen ticket for an order without food);
+     *                    then null is returned instead of an error. Without it,
+     *                    a missing payload means the session expired and the
+     *                    server sent the login page.
+     */
+    private byte[] fetchPayload(String url, String emptyMarker) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setConnectTimeout(10000);
         conn.setReadTimeout(15000);
@@ -576,8 +650,12 @@ public class MainActivity extends Activity {
             int n;
             while ((n = in.read(chunk)) != -1) buf.write(chunk, 0, n);
 
-            Matcher m = RAWBT_PAYLOAD.matcher(buf.toString("UTF-8"));
-            if (!m.find()) throw new Exception("data struk tidak ditemukan (sesi habis?)");
+            String body = buf.toString("UTF-8");
+            Matcher m = RAWBT_PAYLOAD.matcher(body);
+            if (!m.find()) {
+                if (emptyMarker != null && body.contains(emptyMarker)) return null;
+                throw new Exception("data struk tidak ditemukan (sesi habis?)");
+            }
 
             return Base64.decode(m.group(1), Base64.DEFAULT);
         } finally {
@@ -668,7 +746,7 @@ public class MainActivity extends Activity {
         // The receipt opens with target="_blank"; without this the tap does nothing.
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString() + " POSKasirApp/2.5");
+        s.setUserAgentString(s.getUserAgentString() + " POSKasirApp/2.6");
         userAgent = s.getUserAgentString();
 
         webView.addJavascriptInterface(new PosBridge(), "PosApp");
@@ -724,6 +802,12 @@ public class MainActivity extends Activity {
                     return true;
                 }
 
+                String kitchenUrl = printUrl(uri, KITCHEN_PRINT);
+                if (kitchenUrl != null) {
+                    handleKitchen(kitchenUrl);
+                    return true;
+                }
+
                 if ("intent".equals(scheme)) {
                     try {
                         startActivity(Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME));
@@ -762,8 +846,11 @@ public class MainActivity extends Activity {
                         // "Cetak" on the receipt page opens the print view in a
                         // new tab; print it instead of swapping the page out.
                         String receiptUrl = receiptPrintUrl(request.getUrl());
+                        String kitchenUrl = printUrl(request.getUrl(), KITCHEN_PRINT);
                         if (receiptUrl != null) {
                             handleReceipt(receiptUrl);
+                        } else if (kitchenUrl != null) {
+                            handleKitchen(kitchenUrl);
                         } else {
                             webView.loadUrl(request.getUrl().toString());
                         }
@@ -850,6 +937,7 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         if (requestCode == ReceiptPrinter.PERMISSION_REQUEST) {
             printer.onPermissionResult(grantResults);
+            kitchenPrinter.onPermissionResult(grantResults);
             return;
         }
 
@@ -902,6 +990,7 @@ public class MainActivity extends Activity {
         super.onResume();
         hideSystemUI();
         printer.warmUp();
+        kitchenPrinter.warmUp();
         // Re-pin after a reboot, after Wi-Fi settings, or whenever Android let go.
         kiosk.enforce(this);
     }
@@ -909,6 +998,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         new Thread(printer::disconnect, "printer-close").start();
+        new Thread(kitchenPrinter::disconnect, "kitchen-printer-close").start();
         super.onDestroy();
     }
 

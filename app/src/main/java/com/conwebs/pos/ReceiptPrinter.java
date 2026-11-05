@@ -100,10 +100,35 @@ class ReceiptPrinter {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable idleClose = () -> new Thread(this::disconnect, "printer-idle").start();
 
-    ReceiptPrinter(Activity activity, Status status) {
+    /**
+     * Which printer this is. The register can drive two at once — receipts at
+     * the counter and tickets in the kitchen — each with its own saved choice
+     * and its own open link.
+     */
+    enum Role {
+        RECEIPT(PREFS,             "Printer Struk", "Struk",       "🖨"),
+        KITCHEN("POSPrinterKitchen", "Printer Dapur", "Tiket dapur", "🍳");
+
+        final String prefsName;
+        final String title;
+        final String what;
+        final String icon;
+
+        Role(String prefsName, String title, String what, String icon) {
+            this.prefsName = prefsName;
+            this.title     = title;
+            this.what      = what;
+            this.icon      = icon;
+        }
+    }
+
+    final Role role;
+
+    ReceiptPrinter(Activity activity, Status status, Role role) {
         this.activity = activity;
-        this.prefs = activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE);
-        this.status = status;
+        this.role     = role;
+        this.prefs    = activity.getSharedPreferences(role.prefsName, Activity.MODE_PRIVATE);
+        this.status   = status;
     }
 
     String type()    { return prefs.getString(KEY_TYPE, null); }
@@ -123,7 +148,7 @@ class ReceiptPrinter {
     boolean begin() {
         if (!busy.compareAndSet(false, true)) {
             activity.runOnUiThread(() ->
-                Toast.makeText(activity, "Struk sebelumnya masih dicetak…", Toast.LENGTH_SHORT).show());
+                Toast.makeText(activity, role.what + " sebelumnya masih dicetak…", Toast.LENGTH_SHORT).show());
             return false;
         }
 
@@ -131,7 +156,7 @@ class ReceiptPrinter {
         fetchMs       = -1;
         lastConnectMs = -1;
 
-        activity.runOnUiThread(() -> status.progress("🖨 Menyiapkan struk…"));
+        activity.runOnUiThread(() -> status.progress(role.icon + " Menyiapkan " + role.what.toLowerCase() + "…"));
 
         // Connect while the receipt is still being fetched from the server,
         // instead of one after the other.
@@ -146,9 +171,9 @@ class ReceiptPrinter {
 
     /** "✓ Struk tercetak · 1,2 dtk (server 0,4 · printer 0,7)" */
     private String doneText() {
-        if (jobStarted == 0) return "✓ Struk tercetak";
+        if (jobStarted == 0) return "✓ " + role.what + " tercetak";
 
-        StringBuilder s = new StringBuilder("✓ Struk tercetak · ")
+        StringBuilder s = new StringBuilder("✓ " + role.what + " tercetak · ")
             .append(seconds(System.currentTimeMillis() - jobStarted)).append(" dtk");
 
         if (fetchMs >= 0 || lastConnectMs >= 0) {
@@ -185,7 +210,7 @@ class ReceiptPrinter {
         }
 
         busy.set(true);
-        activity.runOnUiThread(() -> status.progress("🖨 Mencetak ke " + name() + "…"));
+        activity.runOnUiThread(() -> status.progress(role.icon + " Mencetak ke " + name() + "…"));
 
         new Thread(() -> {
             try {
@@ -391,7 +416,7 @@ class ReceiptPrinter {
 
     private void showFailure(byte[] data, Exception e) {
         new AlertDialog.Builder(activity)
-            .setTitle("Struk gagal dicetak")
+            .setTitle(role.what + " gagal dicetak")
             .setMessage(e.getMessage() + "\n\nPrinter: " + name())
             .setPositiveButton("Coba Lagi", (d, w) -> print(data))
             .setNeutralButton("Ganti Printer", (d, w) -> choosePrinter(false, () -> print(data)))
@@ -422,7 +447,7 @@ class ReceiptPrinter {
             };
 
         new AlertDialog.Builder(activity)
-            .setTitle("Pilih Printer Struk" + current)
+            .setTitle("Pilih " + role.title + current)
             .setItems(options, (d, which) -> {
                 if (which == 0) chooseBluetooth(then);
                 else if (which == 1) chooseNetwork(then);
@@ -552,14 +577,14 @@ class ReceiptPrinter {
             .putString(KEY_ADDR, address)
             .putString(KEY_NAME, name)
             .apply();
-        Toast.makeText(activity, "Printer: " + name, Toast.LENGTH_SHORT).show();
+        Toast.makeText(activity, role.title + ": " + name, Toast.LENGTH_SHORT).show();
     }
 
     /** A short slip so the cashier knows at once whether the pairing works. */
     void testPrint() {
         String text = "\u001b@"           // initialise
             + "\u001ba\u0001"             // centre
-            + "POS KASIR\n"
+            + role.title.toUpperCase() + "\n"
             + "Tes printer berhasil\n"
             + name() + "\n\n\n\n"
             + "\u001dV\u0001";            // partial cut, ignored by printers without a cutter
@@ -575,15 +600,24 @@ class ReceiptPrinter {
                == PackageManager.PERMISSION_GRANTED;
     }
 
+    /** Both printers share the request code; only the one that asked reacts. */
     void onPermissionResult(int[] grantResults) {
         Runnable next = afterPermission;
+        if (next == null) return;
         afterPermission = null;
 
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            if (next != null) next.run();
+            next.run();
         } else {
-            Toast.makeText(activity, "Tanpa izin Bluetooth, struk tidak bisa dicetak.",
-                Toast.LENGTH_LONG).show();
+            Toast.makeText(activity, "Tanpa izin Bluetooth, " + role.what.toLowerCase()
+                + " tidak bisa dicetak.", Toast.LENGTH_LONG).show();
         }
+    }
+
+    /** End a job quietly: the order turned out to have nothing to print. */
+    void skip() {
+        busy.set(false);
+        jobStarted = 0;
+        activity.runOnUiThread(() -> status.finished(null));
     }
 }
