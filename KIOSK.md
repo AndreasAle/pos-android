@@ -65,7 +65,7 @@ adb version
 (Kalau "adb tidak dikenal", jalankan dari folder `platform-tools` di atas.)
 
 ### A.2 Siapkan APK
-APK ada di `dist/POS-Kasir-VARIL-v2.4.0.apk`.
+APK ada di `dist/POS-Kasir-VARIL-v2.5.0.apk`.
 
 ### A.3 Cadangkan kunci tanda tangan (WAJIB)
 APK ditandatangani dengan file ini:
@@ -117,7 +117,7 @@ tablet dan izinkan.
 
 ### B.5 Pasang APK
 ```bash
-adb install -r dist/POS-Kasir-VARIL-v2.4.0.apk
+adb install -r dist/POS-Kasir-VARIL-v2.5.0.apk
 ```
 Harus muncul `Success`.
 

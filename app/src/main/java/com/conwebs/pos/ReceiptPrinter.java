@@ -47,6 +47,8 @@ class ReceiptPrinter {
     private static final String KEY_TYPE  = "type";
     private static final String KEY_ADDR  = "address";
     private static final String KEY_NAME  = "name";
+    /** Per printer address: which {@link #openSocket} method connected last time. */
+    private static final String KEY_BT_METHOD = "bt_method_";
 
     /** Serial Port Profile — what Bluetooth receipt printers expose. */
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
@@ -58,7 +60,7 @@ class ReceiptPrinter {
     private static final long DRAIN_MS = 600;
 
     /** Close the kept-open Bluetooth link after this long without a receipt. */
-    private static final long IDLE_CLOSE_MS = 2 * 60 * 1000;
+    private static final long IDLE_CLOSE_MS = 15 * 60 * 1000;
 
     /** Where the cashier sees what the printer is doing; always called on the UI thread. */
     interface Status {
@@ -90,6 +92,11 @@ class ReceiptPrinter {
     private BluetoothSocket btSocket;
     private String btSocketAddress;
 
+    /** For the timing shown after each receipt. */
+    private volatile long jobStarted;
+    private volatile long fetchMs = -1;
+    private volatile long lastConnectMs = -1;
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable idleClose = () -> new Thread(this::disconnect, "printer-idle").start();
 
@@ -120,8 +127,44 @@ class ReceiptPrinter {
             return false;
         }
 
+        jobStarted    = System.currentTimeMillis();
+        fetchMs       = -1;
+        lastConnectMs = -1;
+
         activity.runOnUiThread(() -> status.progress("🖨 Menyiapkan struk…"));
+
+        // Connect while the receipt is still being fetched from the server,
+        // instead of one after the other.
+        warmUp();
         return true;
+    }
+
+    /** How long the receipt took to come from the server, for the timing note. */
+    void fetched(long ms) {
+        fetchMs = ms;
+    }
+
+    /** "✓ Struk tercetak · 1,2 dtk (server 0,4 · printer 0,7)" */
+    private String doneText() {
+        if (jobStarted == 0) return "✓ Struk tercetak";
+
+        StringBuilder s = new StringBuilder("✓ Struk tercetak · ")
+            .append(seconds(System.currentTimeMillis() - jobStarted)).append(" dtk");
+
+        if (fetchMs >= 0 || lastConnectMs >= 0) {
+            s.append("  (");
+            if (fetchMs >= 0) s.append("server ").append(seconds(fetchMs));
+            if (fetchMs >= 0 && lastConnectMs >= 0) s.append(" · ");
+            if (lastConnectMs >= 0) s.append("sambung printer ").append(seconds(lastConnectMs));
+            s.append(")");
+        }
+
+        jobStarted = 0;
+        return s.toString();
+    }
+
+    private static String seconds(long ms) {
+        return String.format(java.util.Locale.ROOT, "%.1f", ms / 1000.0).replace('.', ',');
     }
 
     /** End a job that never reached the printer, e.g. the server fetch failed. */
@@ -150,7 +193,8 @@ class ReceiptPrinter {
                     send(data);
                 }
                 busy.set(false);
-                activity.runOnUiThread(() -> status.finished("✓ Struk tercetak"));
+                String done = doneText();
+                activity.runOnUiThread(() -> status.finished(done));
             } catch (Exception e) {
                 busy.set(false);
                 activity.runOnUiThread(() -> {
@@ -256,28 +300,57 @@ class ReceiptPrinter {
         } catch (SecurityException ignored) {
         }
 
-        BluetoothSocket socket = null;
+        long started = System.currentTimeMillis();
 
-        try {
-            socket = device.createRfcommSocketToServiceRecord(SPP_UUID);
-            socket.connect();
-        } catch (IOException first) {
-            closeQuietly(socket);
-            // Many no-brand printers never publish an SDP record; channel 1 is
-            // where they all listen anyway.
+        // A way that fails can take several seconds to time out, so try the one
+        // that worked for this printer last time before the others.
+        int remembered = prefs.getInt(KEY_BT_METHOD + address(), -1);
+        int[] order = remembered >= 0
+            ? new int[]{remembered, 0, 1, 2}
+            : new int[]{0, 1, 2};
+
+        boolean[] tried = new boolean[3];
+
+        for (int method : order) {
+            if (tried[method]) continue;
+            tried[method] = true;
+
+            BluetoothSocket socket = null;
             try {
-                Method m = device.getClass().getMethod("createRfcommSocket", int.class);
-                socket = (BluetoothSocket) m.invoke(device, 1);
+                socket = openSocket(device, method);
                 socket.connect();
-            } catch (Exception second) {
+
+                if (method != remembered) {
+                    prefs.edit().putInt(KEY_BT_METHOD + address(), method).apply();
+                }
+
+                lastConnectMs = System.currentTimeMillis() - started;
+                btSocket = socket;
+                btSocketAddress = address();
+                return socket;
+            } catch (Exception e) {
                 closeQuietly(socket);
-                throw new IOException("Printer tidak menjawab — pastikan menyala dan dekat tablet");
             }
         }
 
-        btSocket = socket;
-        btSocketAddress = address();
-        return socket;
+        throw new IOException("Printer tidak menjawab — pastikan menyala dan dekat tablet");
+    }
+
+    /**
+     * The three ways receipt printers accept a serial link, cheapest first:
+     * 0 — insecure SPP: no pairing-key handshake, what most thermal printers expect;
+     * 1 — secure SPP: the textbook way;
+     * 2 — raw channel 1: for printers that publish no SDP record at all.
+     */
+    @SuppressLint("MissingPermission")
+    private BluetoothSocket openSocket(BluetoothDevice device, int method) throws Exception {
+        switch (method) {
+            case 0:  return device.createInsecureRfcommSocketToServiceRecord(SPP_UUID);
+            case 1:  return device.createRfcommSocketToServiceRecord(SPP_UUID);
+            default:
+                Method m = device.getClass().getMethod("createRfcommSocket", int.class);
+                return (BluetoothSocket) m.invoke(device, 1);
+        }
     }
 
     private void sendNetwork(byte[] data) throws IOException {

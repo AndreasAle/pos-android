@@ -132,7 +132,7 @@ public class MainActivity extends Activity {
                 }
                 printStatus.setText(text);
                 printStatus.setVisibility(View.VISIBLE);
-                printStatus.postDelayed(hidePrintStatus, 2000);
+                printStatus.postDelayed(hidePrintStatus, 3500);
             }
         });
         setupWebView();
@@ -541,7 +541,9 @@ public class MainActivity extends Activity {
 
         new Thread(() -> {
             try {
+                long t0 = System.currentTimeMillis();
                 byte[] data = fetchEscPos(receiptUrl + "?via=rawbt&" + NATIVE_FLAG);
+                printer.fetched(System.currentTimeMillis() - t0);
                 printer.print(data);
             } catch (Exception e) {
                 printer.abort("Gagal mengambil struk dari server: " + e.getMessage());
@@ -666,7 +668,7 @@ public class MainActivity extends Activity {
         // The receipt opens with target="_blank"; without this the tap does nothing.
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString() + " POSKasirApp/2.4");
+        s.setUserAgentString(s.getUserAgentString() + " POSKasirApp/2.5");
         userAgent = s.getUserAgentString();
 
         webView.addJavascriptInterface(new PosBridge(), "PosApp");
