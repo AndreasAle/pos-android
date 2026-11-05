@@ -10,8 +10,8 @@ android {
         applicationId "com.conwebs.pos"
         minSdk 26
         targetSdk 34
-        versionCode 12
-        versionName "2.7.0"
+        versionCode 13
+        versionName "2.7.1"
     }
 
     buildTypes {
@@ -34,4 +34,6 @@ android {
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
+    // Receipt fetches: connection pooling and IPv4-first DNS (see MainActivity.HTTP).
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }

@@ -45,6 +45,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+
+import okhttp3.Dns;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -635,31 +643,21 @@ public class MainActivity extends Activity {
      *                    server sent the login page.
      */
     private byte[] fetchPayload(String url, String emptyMarker) throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setConnectTimeout(10000);
-        conn.setReadTimeout(15000);
-        conn.setRequestProperty("User-Agent", userAgent);
+        Request.Builder req = new Request.Builder().url(url).header("User-Agent", userAgent);
 
         String cookie = CookieManager.getInstance().getCookie(url);
-        if (cookie != null) conn.setRequestProperty("Cookie", cookie);
+        if (cookie != null) req.header("Cookie", cookie);
 
-        int status = conn.getResponseCode();
-        if (status == 401 || status == 419) {
-            conn.disconnect();
-            throw new Exception("sesi login habis, silakan login ulang");
-        }
-        if (status != HttpURLConnection.HTTP_OK) {
-            conn.disconnect();
-            throw new Exception("server menjawab kode " + status);
-        }
+        try (Response res = HTTP.newCall(req.build()).execute()) {
+            int status = res.code();
+            if (status == 401 || status == 419) {
+                throw new Exception("sesi login habis, silakan login ulang");
+            }
+            if (status != 200 || res.body() == null) {
+                throw new Exception("server menjawab kode " + status);
+            }
 
-        try (InputStream in = conn.getInputStream()) {
-            ByteArrayOutputStream buf = new ByteArrayOutputStream();
-            byte[] chunk = new byte[8192];
-            int n;
-            while ((n = in.read(chunk)) != -1) buf.write(chunk, 0, n);
-
-            String body = buf.toString("UTF-8");
+            String body = res.body().string();
             Matcher m = RAWBT_PAYLOAD.matcher(body);
             if (!m.find()) {
                 if (emptyMarker != null && body.contains(emptyMarker)) return null;
@@ -668,10 +666,28 @@ public class MainActivity extends Activity {
 
             return Base64.decode(m.group(1), Base64.DEFAULT);
         }
-        // No disconnect(): with the body read to the end, the connection goes
-        // back to the keep-alive pool, so the next receipt skips the TCP and
-        // TLS handshakes (several hundred ms on a shop's Wi-Fi).
     }
+
+    /**
+     * One client for every receipt fetch, so connections are pooled and the
+     * TLS handshake is paid once.
+     *
+     * IPv4 is tried first. The server publishes IPv6 addresses too, and on a
+     * network where IPv6 is advertised but does not actually route, each one
+     * hung for the full connect timeout before falling back — a 20-second
+     * "server" time per receipt. The WebView never showed it because Chrome
+     * races both families.
+     */
+    private static final OkHttpClient HTTP = new OkHttpClient.Builder()
+        .dns(hostname -> {
+            List<InetAddress> all = new ArrayList<>(Dns.SYSTEM.lookup(hostname));
+            all.sort((a, b) -> Boolean.compare(a instanceof Inet6Address, b instanceof Inet6Address));
+            return all;
+        })
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build();
 
     /** Receipts fetched ahead of the tap, by print-view URL. */
     private final Map<String, byte[]> receiptCache = new ConcurrentHashMap<>();
