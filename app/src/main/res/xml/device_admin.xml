@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lock task and the home-screen preference come with device ownership itself;
+     no extra admin policies are needed. -->
+<device-admin>
+    <uses-policies/>
+</device-admin>

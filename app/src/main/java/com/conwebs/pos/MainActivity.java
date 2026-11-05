@@ -14,6 +14,8 @@ import android.os.Message;
 import android.view.KeyEvent;
 import android.view.View;
 import android.print.PrintManager;
+import android.text.InputType;
+import android.view.MotionEvent;
 import android.util.Base64;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
@@ -39,6 +41,8 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -79,6 +83,8 @@ public class MainActivity extends Activity {
     private static final String NATIVE_FLAG = "native_app=1";
 
     private ReceiptPrinter printer;
+    private KioskManager   kiosk;
+    private AdminPin       adminPin;
 
     private TextView printStatus;
     private final Runnable hidePrintStatus = () -> printStatus.setVisibility(View.GONE);
@@ -131,6 +137,10 @@ public class MainActivity extends Activity {
         });
         setupWebView();
 
+        kiosk    = new KioskManager(this);
+        adminPin = new AdminPin(this);
+        handleRecoveryIntent(getIntent());
+
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         baseUrl = prefs.getString(KEY_URL, null);
 
@@ -147,7 +157,12 @@ public class MainActivity extends Activity {
             return true;
         });
 
-        changeUrlBtn.setOnClickListener(v -> showUrlDialog(false));
+        changeUrlBtn.setOnClickListener(v -> showSettingsMenu());
+
+        // A dropped Wi-Fi is the usual reason this screen shows; let the admin
+        // fix it without leaving the kiosk.
+        Button wifiBtn = findViewById(R.id.wifiButton);
+        wifiBtn.setOnClickListener(v -> requireAdmin(() -> kiosk.openWifi(this)));
 
         retryBtn.setOnClickListener(v -> {
             errorLayout.setVisibility(View.GONE);
@@ -232,34 +247,233 @@ public class MainActivity extends Activity {
 
         if (!isFirstLaunch) {
             builder.setNegativeButton("Batal", null);
-            builder.setNeutralButton("Keluar Aplikasi", (d, w) -> finish());
         }
 
         builder.show();
     }
 
+    // ── Admin menu & kiosk ────────────────────────────────────────────────────
+
+    /** Five quick taps in the top-left corner open the admin menu. */
+    private static final int  ADMIN_TAPS        = 5;
+    private static final long ADMIN_TAP_WINDOW  = 3000;
+    private static final int  ADMIN_CORNER_DP   = 72;
+
+    private int  adminTapCount = 0;
+    private long adminTapFirst = 0;
+
+    /**
+     * Watch for the hidden gesture without swallowing the taps: the register's
+     * own menu button lives in that corner and must keep working.
+     */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (ev.getActionMasked() == MotionEvent.ACTION_UP) {
+            float corner = ADMIN_CORNER_DP * getResources().getDisplayMetrics().density;
+
+            if (ev.getX() < corner && ev.getY() < corner) {
+                long now = System.currentTimeMillis();
+
+                if (now - adminTapFirst > ADMIN_TAP_WINDOW) {
+                    adminTapFirst = now;
+                    adminTapCount = 0;
+                }
+
+                if (++adminTapCount >= ADMIN_TAPS) {
+                    adminTapCount = 0;
+                    adminTapFirst = 0;
+                    showSettingsMenu();
+                }
+            }
+        }
+
+        return super.dispatchTouchEvent(ev);
+    }
+
+    /** The admin menu, behind the admin PIN. */
     private void showSettingsMenu() {
+        requireAdmin(this::showAdminMenu);
+    }
+
+    /**
+     * Run {@code action} once the admin PIN is entered. A kiosk tablet must have
+     * a PIN, so one is created first if missing; a tablet that is not a kiosk
+     * and never set one keeps the old open menu.
+     */
+    private void requireAdmin(Runnable action) {
+        if (adminPin.isSet()) {
+            askPin("Masukkan PIN admin", pin -> {
+                if (adminPin.check(pin)) {
+                    action.run();
+                } else {
+                    Toast.makeText(this, "PIN admin salah.", Toast.LENGTH_LONG).show();
+                }
+            });
+        } else if (kiosk.isDeviceOwner()) {
+            createPin(action);
+        } else {
+            action.run();
+        }
+    }
+
+    private void createPin(Runnable then) {
+        askPin("Buat PIN admin (min. " + AdminPin.MIN_LENGTH + " angka)", first -> {
+            if (first.length() < AdminPin.MIN_LENGTH) {
+                Toast.makeText(this, "PIN minimal " + AdminPin.MIN_LENGTH + " angka.",
+                    Toast.LENGTH_LONG).show();
+                return;
+            }
+            askPin("Ulangi PIN admin", second -> {
+                if (!first.equals(second)) {
+                    Toast.makeText(this, "PIN tidak sama, coba lagi.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                adminPin.set(first);
+                Toast.makeText(this, "PIN admin tersimpan.", Toast.LENGTH_SHORT).show();
+                if (then != null) then.run();
+            });
+        });
+    }
+
+    private interface PinCallback {
+        void onPin(String pin);
+    }
+
+    private void askPin(String title, PinCallback callback) {
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        input.setSingleLine(true);
+        input.setPadding(56, 40, 56, 40);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(input)
+            .setPositiveButton("OK", (d, w) -> callback.onPin(input.getText().toString().trim()))
+            .setNegativeButton("Batal", null)
+            .create();
+
+        // Keyboard up at once, so the admin can just type.
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+        }
+        dialog.show();
+        input.requestFocus();
+    }
+
+    private void showAdminMenu() {
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+
         String printerLabel = printer.isConfigured()
             ? "Pilih printer struk  (" + printer.name() + ")"
             : "Pilih printer struk";
 
-        String[] items = {"Ganti alamat server", printerLabel, "Tes cetak printer", "Keluar aplikasi"};
+        labels.add(printerLabel);
+        actions.add(() -> printer.choosePrinter(true, null));
+
+        labels.add("Tes cetak printer");
+        actions.add(() -> {
+            if (printer.usesSystemPrint() || !printer.isConfigured()) {
+                printer.choosePrinter(false, null);
+            } else {
+                printer.testPrint();
+            }
+        });
+
+        labels.add("Pengaturan WiFi");
+        actions.add(() -> kiosk.openWifi(this));
+
+        labels.add("Ganti alamat server");
+        actions.add(() -> showUrlDialog(false));
+
+        if (kiosk.isDeviceOwner()) {
+            if (kiosk.isEnabled()) {
+                labels.add("🔓 Keluar Mode Kiosk (sementara)");
+                actions.add(this::confirmKioskOff);
+            } else {
+                labels.add("🔒 Aktifkan Mode Kiosk");
+                actions.add(() -> {
+                    kiosk.enable(this);
+                    Toast.makeText(this, "Mode kiosk aktif.", Toast.LENGTH_LONG).show();
+                });
+            }
+        }
+
+        labels.add(adminPin.isSet() ? "Ganti PIN admin" : "Buat PIN admin");
+        actions.add(() -> createPin(null));
+
+        if (kiosk.isDeviceOwner()) {
+            labels.add("⚠ Lepas kiosk permanen");
+            actions.add(this::confirmRelease);
+        }
+
+        // Inside the kiosk there is nowhere to exit to.
+        if (!kiosk.isEnabled()) {
+            labels.add("Keluar aplikasi");
+            actions.add(this::finish);
+        }
+
+        String title = kiosk.isDeviceOwner()
+            ? "Menu Admin — Kiosk " + (kiosk.isEnabled() ? "AKTIF" : "NONAKTIF")
+            : "Pengaturan";
 
         new AlertDialog.Builder(this)
-            .setTitle("Pengaturan")
-            .setItems(items, (d, which) -> {
-                if (which == 0) showUrlDialog(false);
-                else if (which == 1) printer.choosePrinter(true, null);
-                else if (which == 2) {
-                    if (printer.usesSystemPrint() || !printer.isConfigured()) {
-                        printer.choosePrinter(false, null);
-                    } else {
-                        printer.testPrint();
-                    }
-                }
-                else finish();
-            })
+            .setTitle(title)
+            .setItems(labels.toArray(new String[0]), (d, which) -> actions.get(which).run())
+            .setNegativeButton("Tutup", null)
             .show();
+    }
+
+    private void confirmKioskOff() {
+        new AlertDialog.Builder(this)
+            .setTitle("Keluar Mode Kiosk?")
+            .setMessage("Tombol Home, Back, dan aplikasi lain akan bisa dipakai lagi.\n\n"
+                + "Mode kiosk TIDAK aktif sendiri — setelah maintenance, buka menu "
+                + "admin lagi dan pilih \"Aktifkan Mode Kiosk\".")
+            .setPositiveButton("Keluar Kiosk", (d, w) -> {
+                kiosk.disable(this);
+                Toast.makeText(this, "Mode kiosk dimatikan.", Toast.LENGTH_LONG).show();
+            })
+            .setNegativeButton("Batal", null)
+            .show();
+    }
+
+    private void confirmRelease() {
+        new AlertDialog.Builder(this)
+            .setTitle("Lepas kiosk permanen?")
+            .setMessage("Aplikasi ini berhenti menjadi pemilik perangkat. Tablet kembali "
+                + "normal sepenuhnya.\n\nUntuk memakai mode kiosk lagi, tablet harus "
+                + "di-setup ulang lewat ADB (biasanya perlu factory reset).")
+            .setPositiveButton("Lepas Permanen", (d, w) -> {
+                kiosk.release(this);
+                Toast.makeText(this, "Kiosk dilepas. Tablet kembali normal.", Toast.LENGTH_LONG).show();
+            })
+            .setNegativeButton("Batal", null)
+            .show();
+    }
+
+    /**
+     * Forgotten admin PIN, from a computer the tablet already trusts for ADB:
+     *
+     *   adb shell am start -n com.conwebs.pos/.MainActivity --ez reset_admin_pin true
+     *
+     * Clears the PIN; the next admin visit asks for a new one at the tablet.
+     */
+    private void handleRecoveryIntent(Intent intent) {
+        if (intent != null && intent.getBooleanExtra("reset_admin_pin", false)) {
+            adminPin.clear();
+            intent.removeExtra("reset_admin_pin");
+            Toast.makeText(this, "PIN admin dihapus. Buat PIN baru di menu admin.",
+                Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleRecoveryIntent(intent);
     }
 
     // ── Receipt printing ──────────────────────────────────────────────────────
@@ -452,7 +666,7 @@ public class MainActivity extends Activity {
         // The receipt opens with target="_blank"; without this the tap does nothing.
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString() + " POSKasirApp/2.3");
+        s.setUserAgentString(s.getUserAgentString() + " POSKasirApp/2.4");
         userAgent = s.getUserAgentString();
 
         webView.addJavascriptInterface(new PosBridge(), "PosApp");
@@ -653,6 +867,11 @@ public class MainActivity extends Activity {
             return true;
         }
 
+        // The register is the whole tablet; Back has nowhere to go.
+        if (kiosk.isEnabled()) {
+            return true;
+        }
+
         // Two presses to leave: a stray tap must not close the register in the
         // middle of a queue.
         long now = System.currentTimeMillis();
@@ -681,6 +900,8 @@ public class MainActivity extends Activity {
         super.onResume();
         hideSystemUI();
         printer.warmUp();
+        // Re-pin after a reboot, after Wi-Fi settings, or whenever Android let go.
+        kiosk.enforce(this);
     }
 
     @Override

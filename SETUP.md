@@ -15,7 +15,7 @@ transaksinya dibuat.
 APK siap pakai ada di:
 
 ```
-dist/POS-Kasir-VARIL-v2.3.0.apk
+dist/POS-Kasir-VARIL-v2.4.0.apk
 ```
 
 **Cara paling gampang — tanpa kabel:**
@@ -33,7 +33,7 @@ dist/POS-Kasir-VARIL-v2.3.0.apk
 2. Sambungkan tablet, jalankan:
 
 ```bash
-adb install -r dist/POS-Kasir-VARIL-v2.3.0.apk
+adb install -r dist/POS-Kasir-VARIL-v2.4.0.apk
 ```
 
 ---
@@ -102,6 +102,12 @@ ketuk **Ganti Printer** saat muncul pesan gagal cetak.
 
 Di pengaturan struk di website, metode cetak "browser" maupun "RawBT" sama-sama
 jalan — di aplikasi keduanya dicetak langsung.
+
+---
+
+## Mode kiosk
+
+Untuk mengunci tablet supaya hanya bisa membuka POS, lihat **[KIOSK.md](KIOSK.md)**.
 
 ---
 

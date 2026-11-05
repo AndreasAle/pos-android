@@ -55,7 +55,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="⚙ Tahan lama untuk ganti server"
+            android:text="⚙ Tahan lama untuk menu admin"
             android:textColor="#6ee7b7"
             android:textSize="11sp"
             android:layout_marginTop="40dp"/>
@@ -122,7 +122,18 @@
                 android:id="@+id/changeUrlButton"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
-                android:text="⚙ Ganti URL"
+                android:text="⚙ Admin"
+                android:layout_marginEnd="12dp"
+                android:backgroundTint="#374151"
+                android:textColor="#f9fafb"
+                android:fontFamily="sans-serif-medium"
+                android:stateListAnimator="@null"/>
+
+            <Button
+                android:id="@+id/wifiButton"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:text="📶 WiFi"
                 android:layout_marginEnd="12dp"
                 android:backgroundTint="#374151"
                 android:textColor="#f9fafb"
