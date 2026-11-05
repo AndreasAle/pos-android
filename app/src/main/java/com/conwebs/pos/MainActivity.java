@@ -43,6 +43,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -600,6 +602,13 @@ public class MainActivity extends Activity {
             return;
         }
 
+        byte[] ready = receiptCache.remove(receiptUrl);
+        if (ready != null) {
+            printer.fetched(0);
+            printer.print(ready);
+            return;
+        }
+
         new Thread(() -> {
             try {
                 long t0 = System.currentTimeMillis();
@@ -658,9 +667,37 @@ public class MainActivity extends Activity {
             }
 
             return Base64.decode(m.group(1), Base64.DEFAULT);
-        } finally {
-            conn.disconnect();
         }
+        // No disconnect(): with the body read to the end, the connection goes
+        // back to the keep-alive pool, so the next receipt skips the TCP and
+        // TLS handshakes (several hundred ms on a shop's Wi-Fi).
+    }
+
+    /** Receipts fetched ahead of the tap, by print-view URL. */
+    private final Map<String, byte[]> receiptCache = new ConcurrentHashMap<>();
+
+    /**
+     * Fetch the receipt the moment the sale succeeds, while the cashier is
+     * still looking at the success screen, so the Cetak tap only has to write
+     * to the printer.
+     */
+    private void prefetchReceipt(String receiptShowUrl) {
+        if (!printer.isConfigured() || printer.usesSystemPrint()) return;
+
+        String printUrl = receiptPrintUrl(Uri.parse(receiptShowUrl.replaceAll("/+$", "") + "/print"));
+        if (printUrl == null) return;
+
+        printer.warmUp();
+
+        new Thread(() -> {
+            try {
+                byte[] data = fetchEscPos(printUrl + "?via=rawbt&" + NATIVE_FLAG);
+                if (receiptCache.size() > 10) receiptCache.clear();
+                receiptCache.put(printUrl, data);
+            } catch (Exception ignored) {
+                // The tap fetches it again and reports any error then.
+            }
+        }, "receipt-prefetch").start();
     }
 
     /** A rawbt: link from any page — print it ourselves, no RawBT needed. */
@@ -714,6 +751,14 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> printer.choosePrinter(true, null));
         }
 
+        /** Called by the register as soon as a sale succeeds. */
+        @JavascriptInterface
+        public void prefetchReceipt(String receiptShowUrl) {
+            if (receiptShowUrl != null && !receiptShowUrl.isEmpty()) {
+                MainActivity.this.prefetchReceipt(receiptShowUrl);
+            }
+        }
+
         /** window.print() on any page, e.g. product labels — the WebView itself ignores it. */
         @JavascriptInterface
         public void printPage() {
@@ -746,7 +791,7 @@ public class MainActivity extends Activity {
         // The receipt opens with target="_blank"; without this the tap does nothing.
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString() + " POSKasirApp/2.6");
+        s.setUserAgentString(s.getUserAgentString() + " POSKasirApp/2.7");
         userAgent = s.getUserAgentString();
 
         webView.addJavascriptInterface(new PosBridge(), "PosApp");
@@ -983,6 +1028,8 @@ public class MainActivity extends Activity {
         super.onPause();
         // Persist the session cookie now; Android may kill the app at any point.
         CookieManager.getInstance().flush();
+        printer.stopKeepAlive();
+        kitchenPrinter.stopKeepAlive();
     }
 
     @Override
@@ -991,6 +1038,8 @@ public class MainActivity extends Activity {
         hideSystemUI();
         printer.warmUp();
         kitchenPrinter.warmUp();
+        printer.startKeepAlive();
+        kitchenPrinter.startKeepAlive();
         // Re-pin after a reboot, after Wi-Fi settings, or whenever Android let go.
         kiosk.enforce(this);
     }

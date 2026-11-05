@@ -15,7 +15,7 @@ transaksinya dibuat.
 APK siap pakai ada di:
 
 ```
-dist/POS-Kasir-VARIL-v2.6.0.apk
+dist/POS-Kasir-VARIL-v2.7.0.apk
 ```
 
 **Cara paling gampang — tanpa kabel:**
@@ -33,7 +33,7 @@ dist/POS-Kasir-VARIL-v2.6.0.apk
 2. Sambungkan tablet, jalankan:
 
 ```bash
-adb install -r dist/POS-Kasir-VARIL-v2.6.0.apk
+adb install -r dist/POS-Kasir-VARIL-v2.7.0.apk
 ```
 
 ---

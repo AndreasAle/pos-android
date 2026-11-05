@@ -56,8 +56,19 @@ class ReceiptPrinter {
     private static final int NETWORK_PORT       = 9100;
     private static final int CONNECT_TIMEOUT_MS = 5000;
 
-    /** Cheap printers drop the tail of the job if the socket closes at once. */
-    private static final long DRAIN_MS = 600;
+    /**
+     * While the register is on screen the Bluetooth link is checked this often,
+     * so a printer that dropped it (switched off, went to sleep) is reconnected
+     * before the next receipt rather than during it.
+     */
+    private static final long KEEP_ALIVE_MS = 45 * 1000;
+
+    /**
+     * DLE EOT 1: "send printer status". A real-time query every ESC/POS printer
+     * answers without printing anything, and a write that fails when the link
+     * is gone.
+     */
+    private static final byte[] STATUS_QUERY = {0x10, 0x04, 0x01};
 
     /** Close the kept-open Bluetooth link after this long without a receipt. */
     private static final long IDLE_CLOSE_MS = 15 * 60 * 1000;
@@ -263,6 +274,67 @@ class ReceiptPrinter {
         handler.postDelayed(idleClose, IDLE_CLOSE_MS);
     }
 
+    private final Runnable keepAlive = new Runnable() {
+        @Override
+        public void run() {
+            new Thread(ReceiptPrinter.this::checkLink, "printer-keepalive").start();
+            handler.postDelayed(this, KEEP_ALIVE_MS);
+        }
+    };
+
+    /** The register is on screen: keep the Bluetooth link ready. */
+    void startKeepAlive() {
+        handler.removeCallbacks(keepAlive);
+        handler.postDelayed(keepAlive, KEEP_ALIVE_MS);
+    }
+
+    /** The app went to the background: stop checking; the idle timer closes it. */
+    void stopKeepAlive() {
+        handler.removeCallbacks(keepAlive);
+    }
+
+    /**
+     * Poke the link; if the printer is gone, reconnect now so the next receipt
+     * does not pay for it. Skipped while a receipt holds the lock.
+     */
+    private void checkLink() {
+        if (!TYPE_BLUETOOTH.equals(type()) || !hasBluetoothPermission() || busy.get()) return;
+
+        synchronized (lock) {
+            try {
+                if (btSocket != null && address().equals(btSocketAddress)) {
+                    write(btSocket, STATUS_QUERY);
+                    drainInput(btSocket);
+                } else {
+                    bluetoothSocket();
+                }
+                scheduleIdleClose();
+            } catch (IOException dead) {
+                closeQuietly(btSocket);
+                btSocket = null;
+                btSocketAddress = null;
+                try {
+                    bluetoothSocket();
+                    scheduleIdleClose();
+                } catch (IOException ignored) {
+                    // Printer off; the next receipt tries again and reports it.
+                }
+            }
+        }
+    }
+
+    /** Throw away status replies so they never pile up in the input buffer. */
+    private void drainInput(BluetoothSocket socket) {
+        try {
+            java.io.InputStream in = socket.getInputStream();
+            byte[] skip = new byte[64];
+            while (in.available() > 0 && in.read(skip) > 0) {
+                // discard
+            }
+        } catch (IOException ignored) {
+        }
+    }
+
     private void send(byte[] data) throws IOException {
         if (TYPE_BLUETOOTH.equals(type())) {
             sendBluetooth(data);
@@ -383,26 +455,16 @@ class ReceiptPrinter {
         int port = parts.length > 1 ? Integer.parseInt(parts[1]) : NETWORK_PORT;
 
         try (Socket socket = new Socket()) {
+            socket.setTcpNoDelay(true);
             socket.connect(new InetSocketAddress(parts[0], port), CONNECT_TIMEOUT_MS);
             OutputStream out = socket.getOutputStream();
             out.write(data);
             out.flush();
-            drain(data.length);
+            // A graceful half-close: TCP still delivers every byte already
+            // written before the FIN, so there is no need to sit and wait.
+            socket.shutdownOutput();
         } catch (IOException e) {
             throw new IOException("Printer " + address() + " tidak terjangkau — cek WiFi dan IP printer");
-        }
-    }
-
-    /**
-     * flush() only hands bytes to the network stack. Wait in proportion before
-     * closing, or cheap printers lose the tail of a long receipt. (The Bluetooth
-     * link stays open, so it needs no wait.)
-     */
-    private void drain(int bytes) {
-        try {
-            Thread.sleep(Math.min(DRAIN_MS + bytes / 4, 5000));
-        } catch (InterruptedException ignored) {
-            Thread.currentThread().interrupt();
         }
     }
 
