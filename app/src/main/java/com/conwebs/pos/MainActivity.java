@@ -118,7 +118,7 @@ public class MainActivity extends Activity {
     private static final long EXIT_WINDOW_MS = 2000;
 
     private WebView      webView;
-    private LinearLayout loadingLayout;
+    private View         loadingLayout;
     private LinearLayout errorLayout;
     private TextView     serverUrlText;
 
