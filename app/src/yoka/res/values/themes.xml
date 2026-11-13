@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Entry screens: light, so there is no dark flash before the first frame. -->
+    <style name="Theme.Yoka" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/yoka_surface</item>
+        <item name="android:statusBarColor">@color/yoka_surface</item>
+        <item name="android:navigationBarColor">@color/yoka_surface</item>
+    </style>
+
+    <!-- The register shell (MainActivity): replaces the client theme's black window. -->
+    <style name="Theme.POSKasir" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/yoka_surface</item>
+        <item name="android:statusBarColor">@color/yoka_surface</item>
+        <item name="android:navigationBarColor">@color/yoka_surface</item>
+    </style>
+</resources>

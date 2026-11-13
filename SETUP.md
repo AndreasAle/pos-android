@@ -125,28 +125,36 @@ sama persis seperti di browser.
 
 ---
 
+## Dua versi aplikasi
+
+Proyek ini punya dua *flavor*:
+
+- **client** (`com.conwebs.pos`) — "POS Kasir", dokumen ini. Tidak berubah.
+- **yoka** (`com.yokapos.kasir`) — "Yoka POS" untuk Google Play, dengan
+  onboarding dan alur daftar/masuk. Lihat **[PLAYSTORE.md](PLAYSTORE.md)**.
+
 ## Build ulang APK
 
-Butuh **JDK 17** dan **Android SDK** (platform 34). Gradle sudah termasuk lewat
+Butuh **JDK 17** dan **Android SDK** (platform 36). Gradle sudah termasuk lewat
 wrapper, jadi tidak perlu dipasang terpisah.
 
 ```bash
-./gradlew assembleRelease
+./gradlew assembleClientRelease
 ```
 
-Hasilnya di `app/build/outputs/apk/release/app-release.apk`.
+Hasilnya di `app/build/outputs/apk/client/release/app-client-release.apk`.
 
 Untuk versi debug (bisa dipasang berdampingan dengan yang release karena nama
 paketnya berbeda):
 
 ```bash
-./gradlew assembleDebug
+./gradlew assembleClientDebug
 ```
 
 Kalau `local.properties` belum ada atau salah, buat berisi lokasi SDK-mu:
 
 ```properties
-sdk.dir=C\:\\Users\\User\\AppData\\Local\\Android\\Sdk
+sdk.dir=C\:\Users\User\AppData\Local\Android\Sdk
 ```
 
 ---
@@ -161,5 +169,6 @@ APK ini ditandatangani dengan **debug key** bawaan Android. Artinya:
 - ⚠️ Kalau nanti dibuat keystore sendiri, aplikasi harus **dicopot dulu** sebelum
   memasang versi baru — Android menolak update yang tanda tangannya berbeda
 
-Untuk rilis ke Play Store nanti, buat keystore sendiri lalu ganti
-`signingConfig signingConfigs.debug` di `app/build.gradle`.
+Aplikasi **client** tetap memakai debug key supaya tablet yang sudah terpasang
+bisa di-update. Rilis Play Store memakai flavor **yoka** dengan kunci sendiri
+(lihat [PLAYSTORE.md](PLAYSTORE.md)).

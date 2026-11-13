@@ -67,7 +67,52 @@ public class MainActivity extends Activity {
 
     private static final String PREFS_NAME  = "POSConfig";
     private static final String KEY_URL     = "server_base_url";
-    private static final String DEFAULT_URL = "https://pos.conweb.id";
+    private static final String DEFAULT_URL = BuildConfig.DEFAULT_URL;
+
+    /** Yoka flow: the page to open first (set by the welcome screen). */
+    static final String EXTRA_ENTRY_PATH = "entry_path";
+
+    /**
+     * Yoka build only. These pages sell or renew a subscription; the Play Store
+     * build keeps billing on the website, so the app never shows a price or a
+     * pay button. Owners manage their plan from their account on the web.
+     */
+    private static final Pattern PLAN_PAGES = Pattern.compile(
+        "^/(saas/(plans|subscription|checkout)|subscription/expired)(/.*)?$");
+
+    /**
+     * Yoka build only: the pages a cashier app needs. Everything else on the site
+     * (dashboard, products, reports, settings, users...) is back office and stays
+     * on the web, the way Moka keeps its dashboard out of the register app.
+     */
+    private static final Pattern KASIR_PAGES = Pattern.compile(
+        "^/(pos|kasir|shifts|orders|receipt|kitchen|login|register|logout|forgot-password"
+        + "|reset-password|email|mulai|onboarding|auth|syarat|privasi|hapus-akun|lang)(/.*)?$");
+
+    /** Hides links to back-office pages, so the cashier is not offered dead ends. */
+    private static final String HIDE_BACKOFFICE_JS =
+        "(function(){var ok=new RegExp('" + KASIR_PAGES.pattern() + "');"
+        + "function scan(){document.querySelectorAll('a[href]').forEach(function(a){try{"
+        + "var u=new URL(a.href,location.href);if(u.origin!==location.origin)return;"
+        + "var p=u.pathname.replace(/\\/+$/,'')||'/';if(!ok.test(p))a.style.display='none';"
+        + "}catch(e){}});}scan();setTimeout(scan,1500);})();";
+
+    /**
+     * Pages a signed-out visitor sees. The last page the WebView settles on tells
+     * the Yoka launcher whether to show the welcome screen or go on to the
+     * register (Laravel hands every visitor a session cookie, so the cookie
+     * alone proves nothing).
+     */
+    private static final Pattern SIGNED_OUT_PAGES = Pattern.compile(
+        "^(/|/(login|register|kasir|forgot-password|reset-password|auth|email|syarat|privasi|hapus-akun)(/.*)?)$");
+
+    /** The web login offers Google sign-in, which Google refuses inside a WebView. */
+    private static final String HIDE_GOOGLE_JS =
+        "(function(){document.querySelectorAll('a[href*=\"/auth/google\"]').forEach(function(a){"
+        + "var b=a.closest('form,div')||a;a.style.display='none';"
+        + "var n=a.nextElementSibling;var p=a.previousElementSibling;"
+        + "[n,p].forEach(function(e){if(e&&/atau|or/i.test((e.textContent||'').trim())&&(e.textContent||'').trim().length<12)e.style.display='none';});"
+        + "});})();";
 
     /** Milliseconds within which a second Back press exits the app. */
     private static final long EXIT_WINDOW_MS = 2000;
@@ -159,7 +204,7 @@ public class MainActivity extends Activity {
         handleRecoveryIntent(getIntent());
 
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        baseUrl = prefs.getString(KEY_URL, null);
+        baseUrl = BuildConfig.YOKA_FLOW ? DEFAULT_URL : prefs.getString(KEY_URL, null);
 
         if (baseUrl == null) {
             showUrlDialog(true);
@@ -196,7 +241,8 @@ public class MainActivity extends Activity {
         // Land on the PIN pad, not the back-office login. A cashier signs in
         // with a short PIN; if a session is already open the server sends us
         // straight through to the register.
-        webView.loadUrl(baseUrl + "/kasir");
+        String path = getIntent() != null ? getIntent().getStringExtra(EXTRA_ENTRY_PATH) : null;
+        webView.loadUrl(baseUrl + (path != null ? path : "/kasir"));
     }
 
     /**
@@ -411,8 +457,19 @@ public class MainActivity extends Activity {
         labels.add("Pengaturan WiFi");
         actions.add(() -> kiosk.openWifi(this));
 
-        labels.add("Ganti alamat server");
-        actions.add(() -> showUrlDialog(false));
+        if (BuildConfig.YOKA_FLOW) {
+            labels.add("Syarat Layanan");
+            actions.add(() -> webView.loadUrl(baseUrl + "/syarat"));
+            labels.add("Kebijakan Privasi");
+            actions.add(() -> webView.loadUrl(baseUrl + "/privasi"));
+            labels.add("Hapus akun");
+            actions.add(() -> webView.loadUrl(baseUrl + "/hapus-akun"));
+            labels.add("Keluar dan kembali ke layar awal");
+            actions.add(this::backToWelcome);
+        } else {
+            labels.add("Ganti alamat server");
+            actions.add(() -> showUrlDialog(false));
+        }
 
         if (kiosk.isDeviceOwner()) {
             if (kiosk.isEnabled()) {
@@ -450,6 +507,19 @@ public class MainActivity extends Activity {
             .setItems(labels.toArray(new String[0]), (d, which) -> actions.get(which).run())
             .setNegativeButton("Tutup", null)
             .show();
+    }
+
+    /** Yoka: drop the login and return to the register / sign-in screen. */
+    private void backToWelcome() {
+        CookieManager cm = CookieManager.getInstance();
+        cm.removeAllCookies(ok -> {
+            cm.flush();
+            Intent i = new Intent();
+            i.setClassName(getPackageName(), "com.conwebs.pos.WelcomeActivity");
+            i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+            finish();
+        });
     }
 
     private void confirmKioskOff() {
@@ -501,6 +571,9 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleRecoveryIntent(intent);
+        if (BuildConfig.YOKA_FLOW && intent != null && intent.hasExtra(EXTRA_ENTRY_PATH)) {
+            openPos();
+        }
     }
 
     // ── Receipt printing ──────────────────────────────────────────────────────
@@ -807,7 +880,8 @@ public class MainActivity extends Activity {
         // The receipt opens with target="_blank"; without this the tap does nothing.
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString() + " POSKasirApp/2.7");
+        s.setUserAgentString(s.getUserAgentString()
+            + (BuildConfig.YOKA_FLOW ? " YokaPOSApp/" + BuildConfig.VERSION_NAME : " POSKasirApp/2.7"));
         userAgent = s.getUserAgentString();
 
         webView.addJavascriptInterface(new PosBridge(), "PosApp");
@@ -828,6 +902,11 @@ public class MainActivity extends Activity {
                 // A WebView drops window.print() on the floor; send it to Android's dialog.
                 view.evaluateJavascript(
                     "window.print = function () { PosApp.printPage(); };", null);
+                if (BuildConfig.YOKA_FLOW) {
+                    view.evaluateJavascript(HIDE_GOOGLE_JS, null);
+                    view.evaluateJavascript(HIDE_BACKOFFICE_JS, null);
+                    rememberSignedIn(url);
+                }
             }
 
             @Override
@@ -866,6 +945,16 @@ public class MainActivity extends Activity {
                 String kitchenUrl = printUrl(uri, KITCHEN_PRINT);
                 if (kitchenUrl != null) {
                     handleKitchen(kitchenUrl);
+                    return true;
+                }
+
+                if (BuildConfig.YOKA_FLOW && isPlanPage(uri)) {
+                    showPlanNotice();
+                    return true;
+                }
+
+                if (BuildConfig.YOKA_FLOW && request.isForMainFrame() && isBackOffice(uri)) {
+                    handleBackOffice(uri);
                     return true;
                 }
 
@@ -980,6 +1069,68 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** Yoka: remember whether the page just loaded is behind the login. Read by SplashActivity. */
+    private void rememberSignedIn(String url) {
+        String path = Uri.parse(url).getPath();
+        if (path == null) path = "/";
+        path = path.length() > 1 ? path.replaceAll("/+$", "") : path;
+
+        boolean signedIn = !SIGNED_OUT_PAGES.matcher(path).matches();
+        getSharedPreferences("YokaFlow", MODE_PRIVATE).edit()
+            .putBoolean("signed_in", signedIn).apply();
+    }
+
+    /** A page on our own site that the cashier app does not offer. */
+    private boolean isBackOffice(Uri uri) {
+        String host = Uri.parse(baseUrl).getHost();
+        if (host == null || !host.equalsIgnoreCase(uri.getHost())) return false;
+
+        String path = uri.getPath() == null ? "/" : uri.getPath().replaceAll("/+$", "");
+        if (path.isEmpty()) path = "/";
+        return !KASIR_PAGES.matcher(path).matches();
+    }
+
+    private void handleBackOffice(Uri uri) {
+        String path = uri.getPath() == null ? "/" : uri.getPath().replaceAll("/+$", "");
+
+        // Logging in sends owners to the dashboard by default; the register is
+        // where this app wants them.
+        if (path.equals("/dashboard") || path.isEmpty()) {
+            webView.loadUrl(baseUrl + "/pos");
+            return;
+        }
+        // The site's logo and "home" links.
+        if (path.equals("/")) {
+            if (getIntent() != null && getIntent().hasExtra(EXTRA_ENTRY_PATH)) {
+                finish();
+            } else {
+                webView.loadUrl(baseUrl + "/kasir");
+            }
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("Dibuka lewat web")
+            .setMessage("Dashboard, laporan, produk, dan pengaturan bisnis tidak ada di aplikasi "
+                + "kasir. Buka Yoka POS di browser laptop atau HP untuk mengelolanya.")
+            .setPositiveButton("Mengerti", null)
+            .show();
+    }
+
+    private boolean isPlanPage(Uri uri) {
+        String path = uri.getPath();
+        return path != null && PLAN_PAGES.matcher(path).matches();
+    }
+
+    private void showPlanNotice() {
+        new AlertDialog.Builder(this)
+            .setTitle("Langganan dikelola di akun Anda")
+            .setMessage("Paket dan pembayaran Yoka POS diatur oleh pemilik bisnis melalui "
+                + "akun Yoka POS di web. Aplikasi kasir tidak memproses pembayaran langganan.")
+            .setPositiveButton("Mengerti", null)
+            .show();
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == FILE_CHOOSER_REQUEST) {
@@ -1020,6 +1171,13 @@ public class MainActivity extends Activity {
 
         // The register is the whole tablet; Back has nowhere to go.
         if (kiosk.isEnabled()) {
+            return true;
+        }
+
+        // Yoka: opened from the welcome screen, so Back goes back to it.
+        if (BuildConfig.YOKA_FLOW && getIntent() != null
+                && getIntent().hasExtra(EXTRA_ENTRY_PATH)) {
+            finish();
             return true;
         }
 

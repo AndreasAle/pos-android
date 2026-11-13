@@ -2,9 +2,25 @@ plugins {
     id 'com.android.application'
 }
 
+// Yoka's Play Store upload key lives OUTSIDE the repo (the repo is public).
+// ~/.yoka-keys/yoka-keystore.properties:
+//   storeFile=C\:\Users\...\yoka-upload.jks
+//   storePassword=...
+//   keyAlias=yoka-upload
+//   keyPassword=...
+def yokaKeysFile = new File(System.getProperty('user.home'), '.yoka-keys/yoka-keystore.properties')
+def yokaKeys = new Properties()
+if (yokaKeysFile.exists()) {
+    yokaKeysFile.withInputStream { yokaKeys.load(it) }
+}
+
 android {
     namespace 'com.conwebs.pos'
-    compileSdk 34
+    compileSdk 36
+
+    buildFeatures {
+        buildConfig true
+    }
 
     defaultConfig {
         applicationId "com.conwebs.pos"
@@ -14,15 +30,61 @@ android {
         versionName "2.7.1"
     }
 
+    signingConfigs {
+        if (yokaKeys.containsKey('storeFile')) {
+            yoka {
+                storeFile file(yokaKeys['storeFile'])
+                storePassword yokaKeys['storePassword']
+                keyAlias yokaKeys['keyAlias']
+                keyPassword yokaKeys['keyPassword']
+            }
+        }
+    }
+
+    // Two products from one code base:
+    //   client - the existing "POS Kasir" tablet app for pos.conweb.id. Unchanged:
+    //            same package, same debug signing, same server dialog, so tablets
+    //            in the field keep updating in place.
+    //   yoka   - "Yoka POS" for Google Play: fixed yokapos.com server, splash,
+    //            onboarding and sign-up flow, release signing.
+    flavorDimensions 'product'
+    productFlavors {
+        client {
+            dimension 'product'
+            buildConfigField 'String',  'DEFAULT_URL',   '"https://pos.conweb.id"'
+            buildConfigField 'boolean', 'YOKA_FLOW',     'false'
+        }
+        yoka {
+            dimension 'product'
+            applicationId "com.yokapos.kasir"
+            targetSdk 36
+            versionCode 1
+            versionName "1.0.0"
+            buildConfigField 'String',  'DEFAULT_URL',   '"https://yokapos.com"'
+            buildConfigField 'boolean', 'YOKA_FLOW',     'true'
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.debug
         }
         debug {
             applicationIdSuffix ".debug"
             debuggable true
+        }
+    }
+
+    // client keeps the debug key (changing it would force every tablet to
+    // uninstall first); yoka signs with the upload key when it exists.
+    productFlavors.configureEach { flavor ->
+        if (flavor.name == 'client') {
+            flavor.signingConfig = signingConfigs.debug
+        } else if (signingConfigs.findByName('yoka') != null) {
+            flavor.signingConfig = signingConfigs.yoka
+        } else {
+            flavor.signingConfig = signingConfigs.debug
         }
     }
 
@@ -33,7 +95,8 @@ android {
 }
 
 dependencies {
-    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.viewpager2:viewpager2:1.1.0'
     // Receipt fetches: connection pooling and IPv4-first DNS (see MainActivity.HTTP).
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }

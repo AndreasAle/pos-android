@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One centred card on a plain light background. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/yoka_surface"
+    android:gravity="center"
+    android:orientation="horizontal">
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1.4"
+        android:background="@drawable/card_white"
+        android:elevation="2dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:padding="36dp">
+
+        <ImageView
+            android:layout_width="180dp"
+            android:layout_height="wrap_content"
+            android:adjustViewBounds="true"
+            android:contentDescription="Yoka POS"
+            android:src="@drawable/yoka_logo"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:gravity="center"
+            android:text="Selamat datang"
+            android:textColor="@color/yoka_ink"
+            android:textSize="26sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:text="Mulai dengan akun bisnis, atau masuk sebagai kasir."
+            android:textColor="@color/yoka_slate"
+            android:textSize="15sp"/>
+
+        <Button
+            android:id="@+id/register"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="26dp"
+            android:background="@drawable/btn_primary"
+            android:stateListAnimator="@null"
+            android:text="Mulai Berjualan"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp"
+            android:textStyle="bold"/>
+
+        <Button
+            android:id="@+id/login"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/btn_outline"
+            android:stateListAnimator="@null"
+            android:text="Sudah punya akun? Masuk"
+            android:textAllCaps="false"
+            android:textColor="@color/yoka_green_dark"
+            android:textSize="16sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:id="@+id/pin"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:background="?android:attr/selectableItemBackground"
+            android:gravity="center"
+            android:text="Masuk sebagai kasir dengan PIN"
+            android:textColor="@color/yoka_slate"
+            android:textSize="15sp"
+            android:textStyle="bold"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/terms"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="8dp"
+                android:text="Syarat Layanan"
+                android:textColor="@color/yoka_slate"
+                android:textSize="12sp"/>
+
+            <TextView
+                android:id="@+id/privacy"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="8dp"
+                android:text="Kebijakan Privasi"
+                android:textColor="@color/yoka_slate"
+                android:textSize="12sp"/>
+
+            <TextView
+                android:id="@+id/deleteAccount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="8dp"
+                android:text="Hapus Akun"
+                android:textColor="@color/yoka_slate"
+                android:textSize="12sp"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+</LinearLayout>

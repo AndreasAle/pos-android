@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="yoka_green">#16A34A</color>
+    <color name="yoka_green_dark">#15803D</color>
+    <color name="yoka_navy">#0B1B3F</color>
+    <color name="yoka_slate">#64748B</color>
+    <color name="yoka_ink">#0F172A</color>
+    <color name="yoka_line">#E2E8F0</color>
+    <color name="yoka_surface">#F1F5F9</color>
+</resources>
