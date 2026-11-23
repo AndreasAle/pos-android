@@ -20,8 +20,12 @@ final class YokaFlow {
 
     /** Paths on yokapos.com, appended to BuildConfig.DEFAULT_URL. */
     static final String PATH_REGISTER = "/register";
-    /** Opening the register while signed out sends the user to /login and back. */
-    static final String PATH_LOGIN    = "/pos";
+    /**
+     * Sign in with an account, then bind this tablet to an outlet (and create
+     * the owner's PIN). Signed out, the site sends /kasir/setup to /login and
+     * back; signed in it binds straight away.
+     */
+    static final String PATH_LOGIN    = "/kasir/setup";
     static final String PATH_PIN      = "/kasir";
     static final String PATH_VERIFY   = "/email/verify";
     static final String PATH_TERMS    = "/syarat";
