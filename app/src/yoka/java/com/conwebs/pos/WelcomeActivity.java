@@ -21,13 +21,14 @@ public class WelcomeActivity extends Activity {
         // Reaching here means onboarding is behind the user, whichever way.
         YokaFlow.setOnboarded(this);
 
-        // Sign-up is a native form (no scrolling); sign-in and PIN use the site.
+        // Two ways in, like other POS apps. Sign-up is a native form; "Masuk"
+        // signs in with an account and binds this tablet to an outlet. The PIN
+        // pad is not offered here: it only makes sense on a bound tablet, and
+        // SplashActivity sends those straight to it.
         findViewById(R.id.register).setOnClickListener(v ->
             startActivity(new Intent(this, RegisterActivity.class)));
         findViewById(R.id.login).setOnClickListener(v ->
             YokaFlow.openPage(this, YokaFlow.PATH_LOGIN));
-        findViewById(R.id.pin).setOnClickListener(v ->
-            YokaFlow.openPage(this, YokaFlow.PATH_PIN));
 
         findViewById(R.id.terms).setOnClickListener(v ->
             YokaFlow.openPage(this, YokaFlow.PATH_TERMS));

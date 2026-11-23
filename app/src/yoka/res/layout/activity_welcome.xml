@@ -44,7 +44,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:gravity="center"
-            android:text="Mulai dengan akun bisnis, atau masuk sebagai kasir."
+            android:text="Daftarkan bisnis baru, atau masuk untuk menghubungkan perangkat ini ke outlet."
             android:textColor="@color/yoka_slate"
             android:textSize="15sp"/>
 
@@ -55,7 +55,7 @@
             android:layout_marginTop="26dp"
             android:background="@drawable/btn_primary"
             android:stateListAnimator="@null"
-            android:text="Mulai Berjualan"
+            android:text="Daftar bisnis baru"
             android:textAllCaps="false"
             android:textColor="#FFFFFF"
             android:textSize="17sp"
@@ -68,22 +68,10 @@
             android:layout_marginTop="12dp"
             android:background="@drawable/btn_outline"
             android:stateListAnimator="@null"
-            android:text="Sudah punya akun? Masuk"
+            android:text="Masuk"
             android:textAllCaps="false"
             android:textColor="@color/yoka_green_dark"
             android:textSize="16sp"
-            android:textStyle="bold"/>
-
-        <TextView
-            android:id="@+id/pin"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="8dp"
-            android:background="?android:attr/selectableItemBackground"
-            android:gravity="center"
-            android:text="Masuk sebagai kasir dengan PIN"
-            android:textColor="@color/yoka_slate"
-            android:textSize="15sp"
             android:textStyle="bold"/>
 
         <LinearLayout
